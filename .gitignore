@@ -1,0 +1,14 @@
+dist/
+.build/
+.DS_Store
+
+# Local credentials and signing identities
+.env
+.env.*
+identity.json
+*.keychain
+*.keychain-db
+*.p12
+*.pfx
+*.pem
+*.key
