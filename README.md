@@ -1,20 +1,24 @@
-# 截屏翻译
+# Screen Translator · 截屏翻译
 
-个人自用的原生 macOS 菜单栏工具：快捷键框选屏幕，调用百度图片翻译，原位置显示实景回填图片。Swift + AppKit，无第三方依赖，无本地 OCR 或大模型，无自建服务器。
+**English** | [简体中文](README.zh-CN.md)
 
-## 使用
+A lightweight native macOS menu bar app for personal use. Select a screen region with a keyboard shortcut, translate it with Baidu Image Translation, and display the translated image in its original position. Built with Swift and AppKit, with no third-party app dependencies, local OCR or language models, or self-hosted server.
 
-1. 双击 `~/Applications/截屏翻译.app` 打开。菜单栏常驻方框“译”图标，菜单只有“主界面”和“退出”两项。“主界面”中填写凭据、配置快捷键和目标语言、打开屏幕录制权限。关闭主界面后仍会驻留菜单栏，选择“退出”才结束运行。
-2. 在[百度翻译开放平台](https://api.fanyi.baidu.com/product/22)开通**图片翻译**服务，填写该平台的 **APP ID 和密钥**。普通 OCR API Key、百度智能云 API Key 与此接口的凭据不通用。无需在聊天里发送密钥。
-3. 设置目标语言和截图快捷键，默认 **F2**，点击保存。F1–F20 可以单独设置，也支持带修饰键的功能键；字母键仍需包含 Command、Control 或 Option。若 Apple 键盘的 F2 被用作亮度键，请按 **Fn/地球键 + F2**。APP ID 和密钥支持标准 Cmd-V 粘贴、Cmd-A 全选以及右键编辑。
-4. 点击快捷键旁的“截图”按钮，或按快捷键。按钮会保存当前填写的配置，先隐藏主界面再进入自由框选，避免把主界面截进去。首次按系统提示授权“屏幕与系统录音”；如果授权后仍失败，退出应用并重新打开。
-5. 拖动框选区域，松开后发送到百度。译图显示在同一位置；按住空格查看原图，松开恢复；Esc 或小叉关闭。翻译进行中也能取消。
+The app's interface is currently in Chinese. This README is available in English and Simplified Chinese.
 
-仅上传选中区域；截图和译图只存于内存，不保存到磁盘。凭据保存在系统钥匙串，快捷键和目标语言保存在 UserDefaults。应用不收集统计、不自动重试，不默认设置开机启动。网络断开或接口失败会给出提示。
+## Usage
 
-## 编译
+1. Open `~/Applications/截屏翻译.app`. A framed “译” icon stays in the menu bar, with two items: **主界面** (Main Window) and **退出** (Quit). Use the main window to enter credentials, configure the shortcut and target language, or open screen recording permissions. Closing the main window keeps the app running in the menu bar; choose Quit to exit.
+2. Enable **Image Translation** on the [Baidu Translate Open Platform](https://api.fanyi.baidu.com/product/22) and enter its **APP ID and secret key**. Credentials for the standalone OCR API or Baidu AI Cloud are not interchangeable with this API's credentials. Keep your secret key private.
+3. Choose a target language and capture shortcut, then save. The default shortcut is **F2**. F1–F20 work on their own or with modifiers; letter keys require Command, Control, or Option. If F2 controls brightness on your keyboard, use **Fn/Globe + F2**. Both credential fields support Cmd-V, Cmd-A, and context-menu editing. Target language options are Simplified Chinese, Traditional Chinese, English, Japanese, and Korean; the source language is detected automatically.
+4. Click **截图** (Capture) next to the shortcut field, or press the shortcut. The Capture button saves the current configuration and hides the main window before region selection. Grant screen recording access when macOS requests it. If capture still fails after approval, quit and reopen the app.
+5. Drag to select a region and release to send it to Baidu. The translated image appears in the same position. Hold Space to view the original, and release to restore the translation. Press Esc or click the close button to dismiss it. You can also cancel while translation is in progress.
 
-要求 Apple Silicon Mac、macOS 15.2+，已安装 Xcode Command Line Tools。
+Only the selected region is uploaded. Captures and translated images are held in memory rather than saved to disk. Credentials are stored in macOS Keychain; shortcut and target language settings are stored in UserDefaults. The app has no analytics, automatic request retries, or login startup enabled by default. Network and API failures produce an error message.
+
+## Build and install
+
+Requires an **Apple Silicon Mac**, **macOS 15.2 or later**, and **Xcode Command Line Tools**.
 
 ```sh
 bash scripts/build.sh
@@ -22,22 +26,32 @@ python3 scripts/install.py
 bash scripts/test.sh
 ```
 
-构建先放在隐藏的 `.build/package` 中。安装脚本退出旧进程、注销并删除旧应用本体，然后用全新的文件安装到 `~/Applications/截屏翻译.app`，保留用户配置与钥匙串凭据。发布目录只保留 `dist/截屏翻译.zip`，不保留会被误打开的第二份应用；安装后移除临时应用。
+The build is staged in the hidden `.build/package` directory. The installer stops the previous app, unregisters and removes its bundle, then installs fresh files at `~/Applications/截屏翻译.app`. Preferences and Keychain credentials are retained. It creates `dist/截屏翻译.zip` and removes the staging app, leaving no second runnable app in `dist` that could be opened by mistake. Build output and the archive are excluded from Git.
 
-使用本机专属、跨构建保持一致的代码签名，无需付费开发者账户。自用运行不需要上架或公证。首次构建会创建仅用于该应用的本地自签名证书和专用钥匙串，保存在 `~/Library/Application Support/ScreenTranslatorSigning`；不添加系统信任根，不修改证书信任设置，不把私钥放入源码。请保留该目录，后续更新沿用同一签名身份。
+### Local code signing and permissions
 
-从 0.1.3 及以前的临时签名迁移到稳定签名时，原屏幕录制授权可能仍绑定旧版本。请关闭再开启系统设置中的“截屏翻译”权限，然后退出并重新打开应用。应用直接调用 ScreenCaptureKit 截图，以实际调用结果判断权限，不再用可能缓存旧状态的 CoreGraphics 预检拦截。权限被拒绝与其他截图故障会分别提示。
+Builds use a stable, machine-specific local signing identity; a paid Apple developer account is not required. The app is intended for local use and is not notarized or distributed through the App Store.
 
-如果旧记录无法正确刷新，可在安装时加 `--reset-screen-permission`，仅重置本应用的截图授权，再由用户确认系统的新请求；正常更新不重置权限，也不修改其他应用的授权。
+The first build creates an app-specific self-signed certificate and a dedicated keychain in `~/Library/Application Support/ScreenTranslatorSigning`. It does not add a system trust root or change certificate trust settings. Private keys stay outside the source tree. Keep this directory so future builds on the same Mac reuse the same identity.
 
-## 实现与验证边界
+When upgrading from the temporary signing used in version 0.1.3 or earlier, screen recording permission may still refer to an old build. Turn the app's permission off and on in System Settings, then quit and reopen the app. Capture uses ScreenCaptureKit directly and checks the actual capture result instead of blocking on a potentially stale CoreGraphics permission preflight. Permission errors and other capture errors are reported separately.
 
-- 全局快捷键使用系统 Carbon 注册，不监听全部按键，不要求辅助功能权限。
-- 按快捷键时临时冻结各显示器画面，可在任一显示器内框选；不支持一次选区跨越多块显示器。
-- 百度接口要求最短边至少 30px、最长边不超过 4096px、宽高比不超过 3:1、图片小于 4 MB。过窄选区会对称补白，大图会缩放或压缩；展示译图前去掉补白。
-- 使用图片翻译 V1 接口 `https://fanyi-api.baidu.com/api/trans/sdk/picture`，`version=3`、`paste=1`；签名为 `md5(appid + md5(imageBytes) + salt + cuid + mac + secret)`。每次请求签名原始上传字节。客户端不自行擦字或合成译文。
-- 测试覆盖签名独立校验、图片请求协议、返回图片解析、异常响应、Retina/副屏坐标、补白还原以及模拟请求闭环，不会调用真实百度服务。
-- **真实接口联调需要用户自行填写有效凭据并开通服务。未完成这一步前，不能声称翻译效果、实时延迟或配额已验证。**
-- 调用额度与价格以百度控制台为准。
+If an obsolete permission record cannot be refreshed, install with:
 
-参考：[图片翻译产品](https://api.fanyi.baidu.com/product/22)、[接口文档](https://api.fanyi.baidu.com/doc/26)。
+```sh
+python3 scripts/install.py --reset-screen-permission
+```
+
+This resets screen capture permission for this app only; the user must approve the new system request. Normal updates do not reset permissions or change other apps' access.
+
+## Implementation and validation
+
+- Global shortcuts use Carbon registration rather than monitoring all keystrokes. Accessibility permission is not required.
+- Capture temporarily freezes each display for region selection. You can select within any one display; a single selection cannot span multiple displays.
+- Image preparation enforces a minimum side length of 30 px, maximum side length of 4096 px, aspect ratio no greater than 3:1, and upload size below 4 MB. Narrow selections receive symmetric padding; large images are resized or compressed. Padding is removed before showing the translated image.
+- Requests use the Image Translation V1 endpoint, `https://fanyi-api.baidu.com/api/trans/sdk/picture`, with `version=3` and `paste=1`. The signature is `md5(appid + md5(imageBytes) + salt + cuid + mac + secret)`, computed from the exact uploaded bytes. Baidu returns the translated image; the client does not erase text or compose translations itself.
+- Tests cover independent signature verification, the image request protocol, response decoding, error handling, Retina and secondary-display coordinates, padding removal, shortcut handling, capture error classification, selection rendering, and a mocked request/response flow.
+- Automated tests do not call the live Baidu service. Verifying live translation quality, latency, and account quotas requires valid credentials and an enabled Image Translation service.
+- Refer to the Baidu console for current pricing and quotas.
+
+References: [Image Translation product](https://api.fanyi.baidu.com/product/22) · [API documentation](https://api.fanyi.baidu.com/doc/26).
