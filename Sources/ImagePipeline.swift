@@ -45,12 +45,12 @@ enum ImagePipeline {
             let bitmap = NSBitmapImageRep(cgImage: rendered)
             let content = CGRect(x: fitted.minX / CGFloat(w), y: fitted.minY / CGFloat(h),
                                  width: fitted.width / CGFloat(w), height: fitted.height / CGFloat(h))
-            if let png = bitmap.representation(using: .png, properties: [:]), png.count < 4_000_000 {
+            if let png = autoreleasepool(invoking: { bitmap.representation(using: .png, properties: [:]) }), png.count < 4_000_000 {
                 return PreparedImage(data: png, mime: "image/png", contentRect: content)
             }
             for quality in [0.9, 0.75, 0.55] {
                 try Task.checkCancellation()
-                if let jpeg = bitmap.representation(using: .jpeg, properties: [.compressionFactor: quality]), jpeg.count < 4_000_000 {
+                if let jpeg = autoreleasepool(invoking: { bitmap.representation(using: .jpeg, properties: [.compressionFactor: quality]) }), jpeg.count < 4_000_000 {
                     return PreparedImage(data: jpeg, mime: "image/jpeg", contentRect: content)
                 }
             }

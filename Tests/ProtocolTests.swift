@@ -3,17 +3,27 @@ import Foundation
 
 final class StubProtocol: URLProtocol {
     static var handler: ((URLRequest) throws -> Data)?
+    static var statusCode = 200
+    static var headers: [String: String] = [:]
     override class func canInit(with request: URLRequest) -> Bool { true }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
     override func startLoading() {
         do {
             let data = try Self.handler!(request)
-            let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
+            let response = HTTPURLResponse(url: request.url!, statusCode: Self.statusCode, httpVersion: nil, headerFields: Self.headers)!
             client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
             client?.urlProtocol(self, didLoad: data)
             client?.urlProtocolDidFinishLoading(self)
         } catch { client?.urlProtocol(self, didFailWithError: error) }
     }
+    override func stopLoading() { }
+}
+
+final class PendingProtocol: URLProtocol {
+    static let started = DispatchSemaphore(value: 0)
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override func startLoading() { Self.started.signal() }
     override func stopLoading() { }
 }
 
@@ -90,6 +100,42 @@ struct ProtocolTests {
         let prepared = try ImagePipeline.prepare(picture)
         let result = try await TranslationClient(session: URLSession(configuration: config)).translate(image: prepared, credentials: credentials, target: "zh")
         try check(result.width == 200 && result.height == 80, "request/response pipeline via isolated URLProtocol (no network)")
+        do {
+            _ = try await TranslationClient(session: URLSession(configuration: config)).translate(image: prepared, credentials: credentials, target: "zh", responseLimit: 16)
+            throw TranslatorError.message("oversized response accepted")
+        } catch let error as TranslatorError {
+            try check(error.localizedDescription.contains("过大"), "streaming response limit rejects oversized body")
+        }
+        StubProtocol.headers = ["Content-Length": "10000"]
+        do {
+            _ = try await TranslationClient(session: URLSession(configuration: config)).translate(image: prepared, credentials: credentials, target: "zh", responseLimit: 16)
+            throw TranslatorError.message("oversized content length accepted")
+        } catch let error as TranslatorError {
+            try check(error.localizedDescription.contains("过大"), "oversized content length rejected")
+        }
+        StubProtocol.headers = [:]; StubProtocol.statusCode = 503
+        do {
+            _ = try await TranslationClient(session: URLSession(configuration: config)).translate(image: prepared, credentials: credentials, target: "zh")
+            throw TranslatorError.message("HTTP failure accepted")
+        } catch let error as TranslatorError {
+            try check(error.localizedDescription.contains("连接"), "HTTP failure reported")
+        }
+        StubProtocol.statusCode = 200
+        let pendingConfig = URLSessionConfiguration.ephemeral
+        pendingConfig.protocolClasses = [PendingProtocol.self]
+        let pendingSession = URLSession(configuration: pendingConfig)
+        let pending = Task { try await TranslationClient(session: pendingSession).translate(image: prepared, credentials: credentials, target: "zh") }
+        let started = await withCheckedContinuation { continuation in
+            DispatchQueue.global().async { continuation.resume(returning: PendingProtocol.started.wait(timeout: .now() + 3) == .success) }
+        }
+        try check(started, "pending request started")
+        pending.cancel()
+        do {
+            _ = try await pending.value
+            throw TranslatorError.message("cancelled request completed")
+        } catch is CancellationError { try check(true, "in-flight request cancelled") }
+        catch let error as URLError where error.code == .cancelled { try check(true, "in-flight request cancelled") }
+        pendingSession.invalidateAndCancel()
         let cancelled = Task { try await Task.sleep(nanoseconds: 1_000_000); try Task.checkCancellation(); _ = try ImagePipeline.prepare(picture) }
         cancelled.cancel()
         do { try await cancelled.value; throw TranslatorError.message("cancellation failed") }

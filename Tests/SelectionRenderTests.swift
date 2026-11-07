@@ -19,5 +19,13 @@ struct SelectionRenderTests {
         print("Selection backdrop sample:",color.redComponent,color.greenComponent,color.blueComponent,color.alphaComponent)
         precondition(color.redComponent > 0.4 && color.alphaComponent > 0.95, "The screenshot must remain visible under the selection mask")
         print("Selection background renders correctly from a known white screenshot")
+        var cancelCount = 0
+        view.onCancel = { cancelCount += 1 }
+        let rightClick = NSEvent.mouseEvent(with: .rightMouseDown, location: .zero, modifierFlags: [],
+                                            timestamp: 0, windowNumber: 0, context: nil,
+                                            eventNumber: 0, clickCount: 1, pressure: 1)!
+        view.rightMouseDown(with: rightClick)
+        precondition(cancelCount == 1, "Right click must cancel selection")
+        print("Right click cancels selection")
     }
 }

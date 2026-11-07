@@ -35,6 +35,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func refreshMenu() {
         let menu = NSMenu()
+        let capture = NSMenuItem(title: "截图", action: #selector(captureClicked), keyEquivalent: "")
+        capture.target = self; menu.addItem(capture)
         let config = NSMenuItem(title: "主界面", action: #selector(settingsClicked), keyEquivalent: "")
         config.target = self; menu.addItem(config)
         let quit = NSMenuItem(title: "退出", action: #selector(quitClicked), keyEquivalent: "q")
@@ -72,6 +74,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         return image
     }
 
+    @objc private func captureClicked() { requestCapture() }
     @objc private func settingsClicked() { showSettings() }
     @objc private func quitClicked() { closeOperation(); NSApp.terminate(nil) }
     @objc private func permissionClicked() {
@@ -86,7 +89,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             controller.onShortcutRecording = { [weak self] recording in
                 guard let self else { return }
                 if recording { self.hotkey.suspend() }
-                else { try? self.hotkey.register(self.settings) }
+                else {
+                    do { try self.hotkey.register(self.settings) }
+                    catch { self.showError("快捷键恢复失败：\(error.localizedDescription) 请重新设置快捷键。") }
+                }
             }
             controller.onSave = { [weak self] value, credentials in
                 guard let self else { return }
@@ -110,6 +116,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func startCapture() {
         closeOperation()
         guard let credentials, credentials.isConfigured else { showSettings(); return }
+        let wasVisible = settingsWindow?.window?.isVisible == true
         settingsWindow?.window?.orderOut(nil)
         // ScreenCaptureKit performs its own authorization. CoreGraphics preflight
         // can be stale after approval/rebuild and must not prevent a real attempt.
@@ -124,7 +131,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         task = Task { [weak self] in
             do {
                 // Wait for the main window's orderOut to reach the compositor.
-                try await Task.sleep(nanoseconds: 180_000_000)
+                if wasVisible { try await Task.sleep(nanoseconds: 180_000_000) }
                 try Task.checkCancellation()
                 try await selector.begin()
             }

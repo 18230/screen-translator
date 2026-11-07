@@ -93,10 +93,11 @@ struct TranslationClient {
             throw TranslatorError.message("返回的译图无法读取。请重新框选后重试。")
         }
         // Bound decoded dimensions before allocating the bitmap.
-        if let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
-           let width = properties[kCGImagePropertyPixelWidth] as? Int,
-           let height = properties[kCGImagePropertyPixelHeight] as? Int,
-           (width > 8192 || height > 8192 || width * height > 33_554_432) {
+        guard let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
+              let width = properties[kCGImagePropertyPixelWidth] as? Int,
+              let height = properties[kCGImagePropertyPixelHeight] as? Int,
+              width > 0, height > 0, width <= 8192, height <= 8192,
+              width <= 33_554_432 / height else {
             throw TranslatorError.message("返回的译图尺寸异常。")
         }
         guard let image = CGImageSourceCreateImageAtIndex(source, 0, nil) else {
@@ -105,14 +106,22 @@ struct TranslationClient {
         return image
     }
 
-    func translate(image: PreparedImage, credentials: BaiduCredentials, target: String) async throws -> CGImage {
+    func translate(image: PreparedImage, credentials: BaiduCredentials, target: String,
+                   responseLimit: Int = 32 * 1024 * 1024) async throws -> CGImage {
         let request = try Self.request(image: image.data, mime: image.mime, credentials: credentials, target: target)
-        let (data, response) = try await session.data(for: request)
+        let (bytes, response) = try await session.bytes(for: request)
         try Task.checkCancellation()
         guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
             throw TranslatorError.message("连接百度服务失败，请检查网络后重试。")
         }
-        guard data.count <= 32 * 1024 * 1024 else { throw TranslatorError.message("百度返回的数据过大。") }
+        let limit = max(0, responseLimit)
+        if response.expectedContentLength > Int64(limit) { throw TranslatorError.message("百度返回的数据过大。") }
+        var data = Data()
+        for try await byte in bytes {
+            guard data.count < limit else { throw TranslatorError.message("百度返回的数据过大。") }
+            data.append(byte)
+        }
+        try Task.checkCancellation()
         return try image.removePadding(from: Self.decode(data))
     }
 }

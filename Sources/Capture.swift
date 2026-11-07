@@ -16,30 +16,46 @@ final class SelectionCoordinator {
     func begin() async throws {
         cancelled = false
         let available = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
-        var snapshots: [(CGRect, CGImage)] = []
-        // Capture before showing any overlays, so selections never include our own UI.
-        for screen in NSScreen.screens {
-            try Task.checkCancellation()
-            let frame = screen.frame
+        // Build filters on the main actor, then capture displays concurrently.
+        let ownApps = available.applications.filter { $0.processID == ProcessInfo.processInfo.processIdentifier }
+        let captures = NSScreen.screens.compactMap { screen -> (CGRect, SCContentFilter, SCStreamConfiguration)? in
             guard let number = screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber,
-                  let display = available.displays.first(where: { $0.displayID == number.uint32Value }) else { continue }
-            let ownApps = available.applications.filter { $0.processID == ProcessInfo.processInfo.processIdentifier }
+                  let display = available.displays.first(where: { $0.displayID == number.uint32Value }) else { return nil }
             let filter = SCContentFilter(display: display, excludingApplications: ownApps, exceptingWindows: [])
             let config = SCStreamConfiguration()
             config.width = max(1, Int(filter.contentRect.width * CGFloat(filter.pointPixelScale)))
             config.height = max(1, Int(filter.contentRect.height * CGFloat(filter.pointPixelScale)))
             config.showsCursor = false
             config.colorSpaceName = CGColorSpace.sRGB
-            let image = try await SCScreenshotManager.captureImage(contentFilter: filter, configuration: config)
-            if UserDefaults.standard.bool(forKey: "captureDiagnosticsEnabled") {
-                // Diagnostics contain only dimensions/counts, never screen content or window titles.
-                UserDefaults.standard.set(["method": "display-filter", "width": image.width, "height": image.height,
-                                           "displays": available.displays.count, "windows": available.windows.count,
-                                           "applications": available.applications.count], forKey: "captureDiagnostics")
-            }
-            snapshots.append((frame, image))
+            return (screen.frame, filter, config)
         }
-        guard !snapshots.isEmpty else { throw TranslatorError.message("未找到可截图的显示器。") }
+        var snapshots: [(CGRect, CGImage)] = []
+        var firstError: Error?
+        await withTaskGroup(of: (CGRect, Result<CGImage, Error>).self) { group in
+            for (frame, filter, config) in captures {
+                group.addTask {
+                    do { return (frame, .success(try await SCScreenshotManager.captureImage(contentFilter: filter, configuration: config))) }
+                    catch { return (frame, .failure(error)) }
+                }
+            }
+            for await (frame, result) in group {
+                switch result {
+                case .success(let image):
+                    snapshots.append((frame, image))
+                    if UserDefaults.standard.bool(forKey: "captureDiagnosticsEnabled") {
+                        UserDefaults.standard.set(["method": "display-filter", "width": image.width, "height": image.height,
+                                                   "displays": available.displays.count, "windows": available.windows.count,
+                                                   "applications": available.applications.count], forKey: "captureDiagnostics")
+                    }
+                case .failure(let error): if firstError == nil { firstError = error }
+                }
+            }
+        }
+        try Task.checkCancellation()
+        if snapshots.isEmpty {
+            if let firstError { throw firstError }
+            throw TranslatorError.message("未找到可截图的显示器。")
+        }
         try Task.checkCancellation()
         guard !cancelled else { return }
         NSApp.activate(ignoringOtherApps: true)
@@ -99,7 +115,7 @@ final class SelectionView: NSView {
             NSColor.controlAccentColor.setStroke()
             let outline = NSBezierPath(rect: selection.insetBy(dx: 0.5, dy: 0.5)); outline.lineWidth = 1.5; outline.stroke()
         }
-        let text = selection.isEmpty ? "拖动框选要翻译的区域 · Esc 取消" : "\(Int(selection.width)) × \(Int(selection.height)) · 松开翻译 · Esc 取消"
+        let text = selection.isEmpty ? "拖动框选要翻译的区域 · 右键或 Esc 取消" : "\(Int(selection.width)) × \(Int(selection.height)) · 松开翻译 · 右键或 Esc 取消"
         let attrs: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: 13, weight: .medium), .foregroundColor: NSColor.white]
         let size = (text as NSString).size(withAttributes: attrs)
         let origin = selection.isEmpty ? CGPoint(x: (bounds.width - size.width) / 2, y: 44) :
@@ -108,6 +124,7 @@ final class SelectionView: NSView {
         NSColor.black.withAlphaComponent(0.8).setFill(); NSBezierPath(roundedRect: badge, xRadius: 8, yRadius: 8).fill()
         (text as NSString).draw(at: origin, withAttributes: attrs)
     }
+    override func rightMouseDown(with event: NSEvent) { onCancel?() }
     override func mouseDown(with event: NSEvent) {
         window?.makeFirstResponder(self)
         start = point(event); selection = .zero; needsDisplay = true
@@ -145,6 +162,7 @@ final class TranslationOverlay {
         original = NSImage(cgImage: image, size: rect.size)
         panel = OverlayPanel(contentRect: rect, styleMask: [.borderless], backing: .buffered, defer: false)
         panel.level = .floating; panel.hasShadow = false; panel.isReleasedWhenClosed = false
+        panel.hidesOnDeactivate = false
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
         imageView = ResultImageView(frame: CGRect(origin: .zero, size: rect.size))
         imageView.imageScaling = .scaleAxesIndependently; imageView.image = original
@@ -159,6 +177,7 @@ final class TranslationOverlay {
         toolbar = NSPanel(contentRect: barRect, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
         toolbar.level = .floating; toolbar.isOpaque = false; toolbar.backgroundColor = .clear
         toolbar.hasShadow = true; toolbar.isReleasedWhenClosed = false
+        toolbar.hidesOnDeactivate = false
         toolbar.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
         let background = NSVisualEffectView(); background.material = .hudWindow; background.state = .active
         background.wantsLayer = true; background.layer?.cornerRadius = 9
